@@ -131,6 +131,7 @@ func sendFirmware(ctrlPoint, packet *bluetooth.DeviceCharacteristic, opts DFUOpt
 	var (
 		chunksSinceReceipt uint8
 		bytesSent          uint32
+		receivedSuccess    bool
 	)
 
 	chunk := make([]byte, opts.SegmentSize)
@@ -154,10 +155,21 @@ func sendFirmware(ctrlPoint, packet *bluetooth.DeviceCharacteristic, opts DFUOpt
 
 		chunksSinceReceipt += 1
 		if chunksSinceReceipt == opts.ReceiveInterval {
-			sizeData, err := awaitDFUResponse(ctrlPoint, []byte{0x11})
+			data, err := awaitDFUResponseRaw(ctrlPoint)
 			if err != nil {
 				return err
 			}
+
+			if bytes.HasPrefix(data, dfuResponseRecvFwImgSuccess) {
+				receivedSuccess = true
+				break
+			}
+
+			if !bytes.HasPrefix(data, []byte{0x11}) {
+				return fmt.Errorf("unexpected dfu response %x (expected 11 or %x)", data, dfuResponseRecvFwImgSuccess)
+			}
+
+			sizeData := bytes.TrimPrefix(data, []byte{0x11})
 			size := binary.LittleEndian.Uint32(sizeData)
 			if size != bytesSent {
 				return fmt.Errorf("size mismatch: expected %d, got %d", bytesSent, size)
@@ -166,6 +178,13 @@ func sendFirmware(ctrlPoint, packet *bluetooth.DeviceCharacteristic, opts DFUOpt
 				opts.ProgressFunc(bytesSent, size, totalSize)
 			}
 			chunksSinceReceipt = 0
+		}
+	}
+
+	if !receivedSuccess {
+		_, err = awaitDFUResponse(ctrlPoint, dfuResponseRecvFwImgSuccess)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -203,6 +222,19 @@ func setRecvInterval(ctrlPoint *bluetooth.DeviceCharacteristic, interval uint8) 
 }
 
 func awaitDFUResponse(ctrlPoint *bluetooth.DeviceCharacteristic, expect []byte) ([]byte, error) {
+	data, err := awaitDFUResponseRaw(ctrlPoint)
+	if err != nil {
+		return nil, err
+	}
+
+	if !bytes.HasPrefix(data, expect) {
+		return nil, fmt.Errorf("unexpected dfu response %x (expected %x)", data, expect)
+	}
+
+	return bytes.TrimPrefix(data, expect), nil
+}
+
+func awaitDFUResponseRaw(ctrlPoint *bluetooth.DeviceCharacteristic) ([]byte, error) {
 	respCh := make(chan []byte, 1)
 	err := ctrlPoint.EnableNotifications(func(buf []byte) {
 		respCh <- buf
@@ -214,9 +246,5 @@ func awaitDFUResponse(ctrlPoint *bluetooth.DeviceCharacteristic, expect []byte) 
 	data := <-respCh
 	ctrlPoint.EnableNotifications(nil)
 
-	if !bytes.HasPrefix(data, expect) {
-		return nil, fmt.Errorf("unexpected dfu response %x (expected %x)", data, expect)
-	}
-
-	return bytes.TrimPrefix(data, expect), nil
+	return data, nil
 }
