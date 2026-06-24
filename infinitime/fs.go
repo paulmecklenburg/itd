@@ -8,7 +8,6 @@ import (
 	"path"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"go.elara.ws/itd/internal/fsproto"
 	"tinygo.org/x/bluetooth"
@@ -310,46 +309,20 @@ func (fl *File) Write(b []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer char.EnableNotifications(nil)
+
+	if err := fl.fs.ensureNotifications(char); err != nil {
+		return 0, err
+	}
+
+	for len(fl.fs.dev.fsNotifyCh) > 0 {
+		<-fl.fs.dev.fsNotifyCh
+	}
 
 	var chunkLen uint32
 
 	dataLen := uint32(len(b))
 	transferred := uint32(0)
 	mtu := uint32(fl.fs.mtu(char))
-
-	// continueCh is used to prevent race conditions. When the
-	// request loop starts, it reads from continueCh, blocking it
-	// until it's "released" by the notification function after
-	// the response is processed.
-	continueCh := make(chan struct{}, 2)
-	var notifErr error
-	err = char.EnableNotifications(func(buf []byte) {
-		var wfr fsproto.WriteFileResponse
-		err = fsproto.ReadResponse(buf, fsproto.WriteFileResp, &wfr)
-		if err != nil {
-			notifErr = err
-			char.EnableNotifications(nil)
-			close(continueCh)
-			return
-		}
-
-		transferred += chunkLen
-		fl.offset += chunkLen
-
-		if wfr.FreeSpace == 0 || transferred == dataLen {
-			char.EnableNotifications(nil)
-			close(continueCh)
-			return
-		}
-
-		if fl.ProgressFunc != nil {
-			fl.ProgressFunc(transferred, fl.size)
-		}
-
-		// Release the request loop
-		continueCh <- struct{}{}
-	})
 
 	err = fsproto.WriteRequest(char, fsproto.WriteFileHeaderOpcode, fsproto.WriteFileHeaderRequest{
 		PathLen:  uint16(len(fl.path)),
@@ -358,12 +331,26 @@ func (fl *File) Write(b []byte) (int, error) {
 		Path:     fl.path,
 	})
 	if err != nil {
-		return int(transferred), err
+		return 0, err
 	}
 
-	for range continueCh {
-		if notifErr != nil {
-			return int(transferred), notifErr
+	for {
+		buf := <-fl.fs.dev.fsNotifyCh
+		var wfr fsproto.WriteFileResponse
+		err = fsproto.ReadResponse(buf, fsproto.WriteFileResp, &wfr)
+		if err != nil {
+			return int(transferred), err
+		}
+
+		transferred += chunkLen
+		fl.offset += chunkLen
+
+		if wfr.FreeSpace == 0 || transferred == dataLen {
+			return int(transferred), nil
+		}
+
+		if fl.ProgressFunc != nil {
+			fl.ProgressFunc(fl.offset, fl.size)
 		}
 
 		amountLeft := dataLen - transferred
@@ -382,8 +369,6 @@ func (fl *File) Write(b []byte) (int, error) {
 			return int(transferred), err
 		}
 	}
-
-	return int(transferred), notifErr
 }
 
 // Read reads data from the file into the byte slice b.
@@ -400,57 +385,18 @@ func (fl *File) Read(b []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer char.EnableNotifications(nil)
+
+	if err := fl.fs.ensureNotifications(char); err != nil {
+		return 0, err
+	}
+
+	for len(fl.fs.dev.fsNotifyCh) > 0 {
+		<-fl.fs.dev.fsNotifyCh
+	}
 
 	transferred := uint32(0)
 	maxLen := uint32(len(b))
 	mtu := uint32(fl.fs.mtu(char))
-
-	var (
-		notifErr error
-		done     bool
-	)
-
-	// continueCh is used to prevent race conditions. When the
-	// request loop starts, it reads from continueCh, blocking it
-	// until it's "released" by the notification function after
-	// the response is processed.
-	continueCh := make(chan struct{}, 2)
-	err = char.EnableNotifications(func(buf []byte) {
-		var rfr fsproto.ReadFileResponse
-		err = fsproto.ReadResponse(buf, fsproto.ReadFileResp, &rfr)
-		if err != nil {
-			notifErr = err
-			char.EnableNotifications(nil)
-			close(continueCh)
-			return
-		}
-
-		fl.size = rfr.FileSize
-
-		if rfr.Offset == rfr.FileSize || rfr.ChunkLen == 0 {
-			notifErr = io.EOF
-			done = true
-			char.EnableNotifications(nil)
-			close(continueCh)
-			return
-		}
-
-		n := copy(b[transferred:], rfr.Data[:rfr.ChunkLen])
-		fl.offset += uint32(n)
-		transferred += uint32(n)
-
-		if fl.ProgressFunc != nil {
-			fl.ProgressFunc(transferred, rfr.FileSize)
-		}
-
-		// Release the request loop
-		continueCh <- struct{}{}
-	})
-	if err != nil {
-		return 0, err
-	}
-	defer char.EnableNotifications(nil)
 
 	amountLeft := maxLen - transferred
 	chunkLen := mtu
@@ -468,16 +414,30 @@ func (fl *File) Read(b []byte) (int, error) {
 		return 0, err
 	}
 
-	if notifErr != nil {
-		return int(transferred), notifErr
-	}
+	for {
+		buf := <-fl.fs.dev.fsNotifyCh
+		var rfr fsproto.ReadFileResponse
+		err = fsproto.ReadResponse(buf, fsproto.ReadFileResp, &rfr)
+		if err != nil {
+			return int(transferred), err
+		}
 
-	for !done {
-		// Wait for the notification function to release the loop
-		<-continueCh
+		fl.size = rfr.FileSize
 
-		if notifErr != nil {
-			return int(transferred), notifErr
+		if rfr.Offset == rfr.FileSize || rfr.ChunkLen == 0 {
+			return int(transferred), io.EOF
+		}
+
+		n := copy(b[transferred:], rfr.Data[:rfr.ChunkLen])
+		fl.offset += uint32(n)
+		transferred += uint32(n)
+
+		if fl.ProgressFunc != nil {
+			fl.ProgressFunc(fl.offset, rfr.FileSize)
+		}
+
+		if transferred == maxLen {
+			return int(transferred), nil
 		}
 
 		amountLeft = maxLen - transferred
@@ -495,8 +455,6 @@ func (fl *File) Read(b []byte) (int, error) {
 			return int(transferred), err
 		}
 	}
-
-	return int(transferred), notifErr
 }
 
 // Stat returns information about the file,
@@ -555,41 +513,60 @@ func (fl *File) Close() error {
 	return nil
 }
 
+func (ifs *FS) ensureNotifications(char *bluetooth.DeviceCharacteristic) error {
+	if ifs.dev.fsNotifyEnabled.Load() {
+		return nil
+	}
+
+	ifs.dev.deviceMtx.Lock()
+	defer ifs.dev.deviceMtx.Unlock()
+
+	if ifs.dev.fsNotifyEnabled.Load() {
+		return nil
+	}
+
+	err := char.EnableNotifications(func(buf []byte) {
+		b := make([]byte, len(buf))
+		copy(b, buf)
+		select {
+		case ifs.dev.fsNotifyCh <- b:
+		default:
+		}
+	})
+
+	if err == nil {
+		ifs.dev.fsNotifyEnabled.Store(true)
+	}
+
+	return err
+}
+
 // requestThenAwaitResponse executes a BLE FS request and then waits for one or more responses,
 // until fn returns true or an error is encountered.
 func (ifs *FS) requestThenAwaitResponse(char *bluetooth.DeviceCharacteristic, opcode fsproto.FSReqOpcode, req any, fn func(buf []byte) (bool, error)) error {
-	var stopped atomic.Bool
-	errCh := make(chan error, 1)
-	char.EnableNotifications(func(buf []byte) {
-		stop, err := fn(buf)
-		if err != nil && !stopped.Load() {
-			errCh <- err
-			char.EnableNotifications(nil)
-			return
-		} else if !stopped.Load() {
-			errCh <- nil
-		}
+	if err := ifs.ensureNotifications(char); err != nil {
+		return err
+	}
 
-		if stop && !stopped.Load() {
-			stopped.Store(true)
-			close(errCh)
-			char.EnableNotifications(nil)
-		}
-	})
-	defer char.EnableNotifications(nil)
+	for len(ifs.dev.fsNotifyCh) > 0 {
+		<-ifs.dev.fsNotifyCh
+	}
 
 	err := fsproto.WriteRequest(char, opcode, req)
 	if err != nil {
 		return err
 	}
 
-	for err := range errCh {
+	for {
+		buf := <-ifs.dev.fsNotifyCh
+		stop, err := fn(buf)
 		if err != nil {
 			return err
 		}
+		if stop {
+			return nil
+		}
 	}
-
-	return nil
 }
 
 func (ifs *FS) mtu(char *bluetooth.DeviceCharacteristic) uint16 {

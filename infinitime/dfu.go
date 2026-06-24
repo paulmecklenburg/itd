@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"time"
 
 	"tinygo.org/x/bluetooth"
 )
@@ -237,13 +238,22 @@ func awaitDFUResponse(ctrlPoint *bluetooth.DeviceCharacteristic, expect []byte) 
 func awaitDFUResponseRaw(ctrlPoint *bluetooth.DeviceCharacteristic) ([]byte, error) {
 	respCh := make(chan []byte, 1)
 	err := ctrlPoint.EnableNotifications(func(buf []byte) {
-		respCh <- buf
+		select {
+		case respCh <- buf:
+		default:
+		}
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	data := <-respCh
+	var data []byte
+	select {
+	case data = <-respCh:
+	case <-time.After(30 * time.Second):
+		ctrlPoint.EnableNotifications(nil)
+		return nil, fmt.Errorf("dfu response timeout")
+	}
 	ctrlPoint.EnableNotifications(nil)
 
 	return data, nil

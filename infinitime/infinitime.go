@@ -26,19 +26,24 @@ func reconnect(opts Options, adapter *bluetooth.Adapter, device *Device, mac str
 
 	done := false
 	for {
-		adapter.Scan(func(a *bluetooth.Adapter, sr bluetooth.ScanResult) {
+		var connectErr error
+		err := adapter.Scan(func(a *bluetooth.Adapter, sr bluetooth.ScanResult) {
 			if sr.Address.String() != mac {
 				return
 			}
 
 			dev, err := a.Connect(sr.Address, bluetooth.ConnectionParams{})
 			if err != nil {
+				connectErr = err
+				a.StopScan()
 				return
 			}
-			adapter.StopScan()
+			a.StopScan()
 
 			device.deviceMtx.Lock()
 			device.device = dev
+			device.charCache = make(map[btChar]*bluetooth.DeviceCharacteristic)
+			device.fsNotifyEnabled.Store(false)
 			device.deviceMtx.Unlock()
 
 			device.notifierMtx.Lock()
@@ -60,6 +65,7 @@ func reconnect(opts Options, adapter *bluetooth.Adapter, device *Device, mac str
 			}
 			device.notifierMtx.Unlock()
 
+			device.reconnecting.Store(false)
 			done = true
 		})
 
@@ -67,7 +73,11 @@ func reconnect(opts Options, adapter *bluetooth.Adapter, device *Device, mac str
 			return
 		}
 
-		time.Sleep(opts.ScanInterval)
+		if err != nil || connectErr != nil {
+			time.Sleep(5 * time.Second)
+		} else {
+			time.Sleep(opts.ScanInterval)
+		}
 	}
 }
 
@@ -92,7 +102,9 @@ func Connect(opts Options) (device *Device, err error) {
 			if opts.OnDisconnect != nil {
 				opts.OnDisconnect(device)
 			}
-			go reconnect(opts, adapter, device, mac)
+			if device.reconnecting.CompareAndSwap(false, true) {
+				go reconnect(opts, adapter, device, mac)
+			}
 		}
 	})
 
@@ -115,7 +127,13 @@ func Connect(opts Options) (device *Device, err error) {
 		}
 		mac = dev.Address.String()
 
-		device = &Device{adapter: a, device: dev, notifierMap: map[btChar]notifier{}}
+		device = &Device{
+			adapter:     a,
+			device:      dev,
+			charCache:   map[btChar]*bluetooth.DeviceCharacteristic{},
+			notifierMap: map[btChar]notifier{},
+			fsNotifyCh:  make(chan []byte, 256),
+		}
 		if opts.OnConnect != nil {
 			opts.OnConnect(device)
 		}
@@ -139,6 +157,12 @@ type Device struct {
 	deviceMtx sync.Mutex
 	device    bluetooth.Device
 	updating  atomic.Bool
+	reconnecting atomic.Bool
+
+	charCache map[btChar]*bluetooth.DeviceCharacteristic
+
+	fsNotifyCh      chan []byte
+	fsNotifyEnabled atomic.Bool
 
 	notifierMtx sync.Mutex
 	notifierMap map[btChar]notifier
@@ -159,15 +183,24 @@ func (d *Device) getChar(c btChar) (*bluetooth.DeviceCharacteristic, error) {
 	d.deviceMtx.Lock()
 	defer d.deviceMtx.Unlock()
 
+	if d.charCache == nil {
+		d.charCache = make(map[btChar]*bluetooth.DeviceCharacteristic)
+	}
+
+	if char, ok := d.charCache[c]; ok && char != nil {
+		return char, nil
+	}
+
 	services, err := d.device.DiscoverServices([]bluetooth.UUID{c.ServiceID})
-	if err != nil {
+	if err != nil || len(services) == 0 {
 		return nil, fmt.Errorf("characteristic %s (%s) not found", c.ID, c.Name)
 	}
 
 	chars, err := services[0].DiscoverCharacteristics([]bluetooth.UUID{c.ID})
-	if err != nil {
+	if err != nil || len(chars) == 0 {
 		return nil, fmt.Errorf("characteristic %s (%s) not found", c.ID, c.Name)
 	}
 
+	d.charCache[c] = chars[0]
 	return chars[0], err
 }
