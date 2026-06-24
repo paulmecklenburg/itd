@@ -189,6 +189,10 @@ func sendFirmware(ctrlPoint, packet *bluetooth.DeviceCharacteristic, opts DFUOpt
 		}
 	}
 
+	if opts.ProgressFunc != nil {
+		opts.ProgressFunc(bytesSent, bytesSent, totalSize)
+	}
+
 	return nil
 }
 
