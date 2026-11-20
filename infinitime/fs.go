@@ -8,10 +8,13 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"go.elara.ws/itd/internal/fsproto"
 	"tinygo.org/x/bluetooth"
 )
+
+const fsResponseTimeout = 10 * time.Second
 
 // FS represents a remote BLE filesystem
 type FS struct {
@@ -335,7 +338,10 @@ func (fl *File) Write(b []byte) (int, error) {
 	}
 
 	for {
-		buf := <-fl.fs.dev.fsNotifyCh
+		buf, err := fl.fs.awaitNotification()
+		if err != nil {
+			return int(transferred), err
+		}
 		var wfr fsproto.WriteFileResponse
 		err = fsproto.ReadResponse(buf, fsproto.WriteFileResp, &wfr)
 		if err != nil {
@@ -415,7 +421,10 @@ func (fl *File) Read(b []byte) (int, error) {
 	}
 
 	for {
-		buf := <-fl.fs.dev.fsNotifyCh
+		buf, err := fl.fs.awaitNotification()
+		if err != nil {
+			return int(transferred), err
+		}
 		var rfr fsproto.ReadFileResponse
 		err = fsproto.ReadResponse(buf, fsproto.ReadFileResp, &rfr)
 		if err != nil {
@@ -513,19 +522,35 @@ func (fl *File) Close() error {
 	return nil
 }
 
+func (ifs *FS) awaitNotification() ([]byte, error) {
+	disconnectCh := ifs.dev.getDisconnectCh()
+	timer := time.NewTimer(fsResponseTimeout)
+	defer timer.Stop()
+
+	select {
+	case buf := <-ifs.dev.fsNotifyCh:
+		return buf, nil
+	case <-disconnectCh:
+		ifs.dev.fsNotifyEnabled.Store(false)
+		return nil, errors.New("device disconnected during filesystem operation")
+	case <-timer.C:
+		return nil, errors.New("filesystem response timeout")
+	}
+}
+
 func (ifs *FS) ensureNotifications(char *bluetooth.DeviceCharacteristic) error {
 	if ifs.dev.fsNotifyEnabled.Load() {
 		return nil
 	}
 
-	ifs.dev.deviceMtx.Lock()
-	defer ifs.dev.deviceMtx.Unlock()
+	ifs.dev.fsNotifyMtx.Lock()
+	defer ifs.dev.fsNotifyMtx.Unlock()
 
 	if ifs.dev.fsNotifyEnabled.Load() {
 		return nil
 	}
 
-	err := char.EnableNotifications(func(buf []byte) {
+	err := ifs.dev.enableNotifications(fsTransferChar, char, func(buf []byte) {
 		b := make([]byte, len(buf))
 		copy(b, buf)
 		select {
@@ -558,7 +583,10 @@ func (ifs *FS) requestThenAwaitResponse(char *bluetooth.DeviceCharacteristic, op
 	}
 
 	for {
-		buf := <-ifs.dev.fsNotifyCh
+		buf, err := ifs.awaitNotification()
+		if err != nil {
+			return err
+		}
 		stop, err := fn(buf)
 		if err != nil {
 			return err

@@ -101,8 +101,16 @@ func initWeather(ctx context.Context, wg WaitGroup, dev *infinitime.Device) erro
 			data, err := getWeather(ctx, lat, lon)
 			if err != nil {
 				log.Warn("Error getting weather data").Err(err).Send()
-				// Wait 15 minutes before retrying
-				sleepCtx(ctx, 15*time.Minute)
+				// Wait 15 minutes before retrying, or wake early on reconnect/manual trigger
+				retryTimer := time.NewTimer(15 * time.Minute)
+				select {
+				case <-retryTimer.C:
+				case <-sendWeatherCh:
+					retryTimer.Stop()
+				case <-ctx.Done():
+					retryTimer.Stop()
+					return
+				}
 				continue
 			}
 

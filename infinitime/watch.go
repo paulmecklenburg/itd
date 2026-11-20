@@ -11,6 +11,7 @@ import (
 
 type notifier interface {
 	notify([]byte)
+	setChar(*bluetooth.DeviceCharacteristic)
 }
 
 type watcher[T any] struct {
@@ -18,6 +19,12 @@ type watcher[T any] struct {
 	nextFuncID int
 	callbacks  map[int]func(T, error)
 	char       *bluetooth.DeviceCharacteristic
+}
+
+func (w *watcher[T]) setChar(c *bluetooth.DeviceCharacteristic) {
+	w.mu.Lock()
+	w.char = c
+	w.mu.Unlock()
 }
 
 func (w *watcher[T]) addCallback(fn func(T, error)) int {
@@ -40,17 +47,28 @@ func (w *watcher[T]) notify(b []byte) {
 }
 
 func (w *watcher[T]) cancelFn(d *Device, ch btChar, id int) func() {
+	var once sync.Once
 	return func() {
-		w.mu.Lock()
-		delete(w.callbacks, id)
-		w.mu.Unlock()
+		once.Do(func() {
+			var charToDisable *bluetooth.DeviceCharacteristic
 
-		if len(w.callbacks) == 0 {
 			d.notifierMtx.Lock()
-			delete(d.notifierMap, ch)
+			w.mu.Lock()
+			delete(w.callbacks, id)
+			if len(w.callbacks) == 0 {
+				if cur, ok := d.notifierMap[ch]; ok && cur == any(w) {
+					delete(d.notifierMap, ch)
+					charToDisable = w.char
+					w.char = nil
+				}
+			}
+			w.mu.Unlock()
 			d.notifierMtx.Unlock()
-			w.char.EnableNotifications(nil)
-		}
+
+			if charToDisable != nil {
+				d.disableNotifications(ch, charToDisable)
+			}
+		})
 	}
 }
 
@@ -62,10 +80,6 @@ func watchChar[T any](ctx context.Context, d *Device, ch btChar, fn func(T, erro
 		w := n.(*watcher[T])
 		funcID := w.addCallback(fn)
 		context.AfterFunc(ctx, w.cancelFn(d, ch, funcID))
-		go func() {
-			<-ctx.Done()
-			w.cancelFn(d, ch, funcID)()
-		}()
 		return nil
 	} else {
 		c, err := d.getChar(ch)
@@ -74,7 +88,7 @@ func watchChar[T any](ctx context.Context, d *Device, ch btChar, fn func(T, erro
 		}
 
 		w := &watcher[T]{callbacks: map[int]func(T, error){}}
-		err = c.EnableNotifications(w.notify)
+		err = d.enableNotifications(ch, c, w.notify)
 		if err != nil {
 			return err
 		}

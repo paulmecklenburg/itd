@@ -7,6 +7,11 @@ import (
 
 // Address returns the MAC address of the connected device.
 func (d *Device) Address() string {
+	if d.mac != "" {
+		return d.mac
+	}
+	d.deviceMtx.Lock()
+	defer d.deviceMtx.Unlock()
 	return d.device.Address.String()
 }
 

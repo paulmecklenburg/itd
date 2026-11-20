@@ -63,28 +63,34 @@ func main() {
 
 	// Create infinitime options struct
 	opts := infinitime.Options{
+		OnDisconnect: func(dev *infinitime.Device) {
+			log.Warn("Disconnected from InfiniTime, waiting to reconnect").Str("address", dev.Address()).Send()
+		},
 		OnReconnect: func(dev *infinitime.Device) {
+			log.Info("Reconnected to InfiniTime").Str("address", dev.Address()).Send()
+
 			if k.Bool("on.reconnect.setTime") {
 				// Set time to current time
-				err = dev.SetTime(time.Now())
-				if err != nil {
-					return
+				if err := dev.SetTime(time.Now()); err != nil {
+					log.Error("Error setting current time on reconnected InfiniTime").Err(err).Send()
 				}
 			}
 
 			// If config specifies to notify on reconnect
 			if k.Bool("on.reconnect.notify") {
 				// Send notification to InfiniTime
-				err = dev.Notify("itd", "Successfully reconnected")
-				if err != nil {
-					return
+				if err := dev.Notify("itd", "Successfully reconnected"); err != nil {
+					log.Error("Error sending reconnect notification to InfiniTime").Err(err).Send()
 				}
 			}
 
 			// FS must be updated on reconnect
 			updateFS = true
 			// Resend weather on reconnect
-			sendWeatherCh <- struct{}{}
+			select {
+			case sendWeatherCh <- struct{}{}:
+			default:
+			}
 		},
 	}
 

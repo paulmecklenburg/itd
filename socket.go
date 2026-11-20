@@ -238,7 +238,10 @@ func (i *ITD) SetTime(_ context.Context, data *rpc.SetTimeRequest) (*rpc.Empty, 
 }
 
 func (i *ITD) WeatherUpdate(context.Context, *rpc.Empty) (*rpc.Empty, error) {
-	sendWeatherCh <- struct{}{}
+	select {
+	case sendWeatherCh <- struct{}{}:
+	default:
+	}
 	return &rpc.Empty{}, nil
 }
 

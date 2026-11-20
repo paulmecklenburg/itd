@@ -66,6 +66,7 @@ func (d *Device) UpgradeFirmware(opts DFUOptions) error {
 
 	d.updating.Store(true)
 	defer d.updating.Store(false)
+	defer stopBlueZNotifies(d.Address(), dfuCtrlPointChar)
 
 	_, err = ctrlPoint.WriteWithoutResponse(dfuCmdStart)
 	if err != nil {
@@ -248,17 +249,21 @@ func awaitDFUResponseRaw(ctrlPoint *bluetooth.DeviceCharacteristic) ([]byte, err
 		}
 	})
 	if err != nil {
+		_ = ctrlPoint.EnableNotifications(nil)
 		return nil, err
 	}
+
+	timer := time.NewTimer(30 * time.Second)
+	defer timer.Stop()
 
 	var data []byte
 	select {
 	case data = <-respCh:
-	case <-time.After(30 * time.Second):
-		ctrlPoint.EnableNotifications(nil)
+	case <-timer.C:
+		_ = ctrlPoint.EnableNotifications(nil)
 		return nil, fmt.Errorf("dfu response timeout")
 	}
-	ctrlPoint.EnableNotifications(nil)
+	_ = ctrlPoint.EnableNotifications(nil)
 
 	return data, nil
 }
