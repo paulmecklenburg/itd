@@ -42,7 +42,7 @@ type DFUOptions struct {
 }
 
 // UpgradeFirmware upgrades the firmware running on the PineTime.
-func (d *Device) UpgradeFirmware(opts DFUOptions) error {
+func (d *Device) UpgradeFirmware(opts DFUOptions) (err error) {
 	if opts.SegmentSize <= 0 {
 		opts.SegmentSize = dfuSegmentSize
 	}
@@ -61,12 +61,22 @@ func (d *Device) UpgradeFirmware(opts DFUOptions) error {
 		return err
 	}
 
+	mac := d.Address()
+	d.pinDFU(mac, 5*time.Minute)
+	defer func() {
+		if err == nil {
+			d.pinDFU(mac, 60*time.Second)
+		} else {
+			d.clearDFUPin()
+		}
+	}()
+
 	d.deviceMtx.Lock()
 	defer d.deviceMtx.Unlock()
 
 	d.updating.Store(true)
 	defer d.updating.Store(false)
-	defer stopBlueZNotifies(d.Address(), dfuCtrlPointChar)
+	defer stopBlueZNotifies(d.adapterID, mac, dfuCtrlPointChar)
 
 	_, err = ctrlPoint.WriteWithoutResponse(dfuCmdStart)
 	if err != nil {

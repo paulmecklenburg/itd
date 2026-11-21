@@ -52,6 +52,8 @@ type DRPCITDClient interface {
 	SetTime(ctx context.Context, in *SetTimeRequest) (*Empty, error)
 	WeatherUpdate(ctx context.Context, in *Empty) (*Empty, error)
 	FirmwareUpgrade(ctx context.Context, in *FirmwareUpgradeRequest) (DRPCITD_FirmwareUpgradeClient, error)
+	Connect(ctx context.Context, in *ConnectRequest) (*StringResponse, error)
+	Disconnect(ctx context.Context, in *Empty) (*StringResponse, error)
 }
 
 type drpcITDClient struct {
@@ -325,6 +327,24 @@ func (x *drpcITD_FirmwareUpgradeClient) RecvMsg(m *DFUProgress) error {
 	return x.MsgRecv(m, drpcEncoding_File_itd_proto{})
 }
 
+func (c *drpcITDClient) Connect(ctx context.Context, in *ConnectRequest) (*StringResponse, error) {
+	out := new(StringResponse)
+	err := c.cc.Invoke(ctx, "/rpc.ITD/Connect", drpcEncoding_File_itd_proto{}, in, out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *drpcITDClient) Disconnect(ctx context.Context, in *Empty) (*StringResponse, error) {
+	out := new(StringResponse)
+	err := c.cc.Invoke(ctx, "/rpc.ITD/Disconnect", drpcEncoding_File_itd_proto{}, in, out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 type DRPCITDServer interface {
 	HeartRate(context.Context, *Empty) (*IntResponse, error)
 	WatchHeartRate(*Empty, DRPCITD_WatchHeartRateStream) error
@@ -340,6 +360,8 @@ type DRPCITDServer interface {
 	SetTime(context.Context, *SetTimeRequest) (*Empty, error)
 	WeatherUpdate(context.Context, *Empty) (*Empty, error)
 	FirmwareUpgrade(*FirmwareUpgradeRequest, DRPCITD_FirmwareUpgradeStream) error
+	Connect(context.Context, *ConnectRequest) (*StringResponse, error)
+	Disconnect(context.Context, *Empty) (*StringResponse, error)
 }
 
 type DRPCITDUnimplementedServer struct{}
@@ -400,9 +422,17 @@ func (s *DRPCITDUnimplementedServer) FirmwareUpgrade(*FirmwareUpgradeRequest, DR
 	return drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
 }
 
+func (s *DRPCITDUnimplementedServer) Connect(context.Context, *ConnectRequest) (*StringResponse, error) {
+	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
+}
+
+func (s *DRPCITDUnimplementedServer) Disconnect(context.Context, *Empty) (*StringResponse, error) {
+	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
+}
+
 type DRPCITDDescription struct{}
 
-func (DRPCITDDescription) NumMethods() int { return 14 }
+func (DRPCITDDescription) NumMethods() int { return 16 }
 
 func (DRPCITDDescription) Method(n int) (string, drpc.Encoding, drpc.Receiver, interface{}, bool) {
 	switch n {
@@ -532,6 +562,24 @@ func (DRPCITDDescription) Method(n int) (string, drpc.Encoding, drpc.Receiver, i
 						&drpcITD_FirmwareUpgradeStream{in2.(drpc.Stream)},
 					)
 			}, DRPCITDServer.FirmwareUpgrade, true
+	case 14:
+		return "/rpc.ITD/Connect", drpcEncoding_File_itd_proto{},
+			func(srv interface{}, ctx context.Context, in1, in2 interface{}) (drpc.Message, error) {
+				return srv.(DRPCITDServer).
+					Connect(
+						ctx,
+						in1.(*ConnectRequest),
+					)
+			}, DRPCITDServer.Connect, true
+	case 15:
+		return "/rpc.ITD/Disconnect", drpcEncoding_File_itd_proto{},
+			func(srv interface{}, ctx context.Context, in1, in2 interface{}) (drpc.Message, error) {
+				return srv.(DRPCITDServer).
+					Disconnect(
+						ctx,
+						in1.(*Empty),
+					)
+			}, DRPCITDServer.Disconnect, true
 	default:
 		return "", nil, nil, nil, false
 	}
@@ -748,6 +796,38 @@ type drpcITD_FirmwareUpgradeStream struct {
 
 func (x *drpcITD_FirmwareUpgradeStream) Send(m *DFUProgress) error {
 	return x.MsgSend(m, drpcEncoding_File_itd_proto{})
+}
+
+type DRPCITD_ConnectStream interface {
+	drpc.Stream
+	SendAndClose(*StringResponse) error
+}
+
+type drpcITD_ConnectStream struct {
+	drpc.Stream
+}
+
+func (x *drpcITD_ConnectStream) SendAndClose(m *StringResponse) error {
+	if err := x.MsgSend(m, drpcEncoding_File_itd_proto{}); err != nil {
+		return err
+	}
+	return x.CloseSend()
+}
+
+type DRPCITD_DisconnectStream interface {
+	drpc.Stream
+	SendAndClose(*StringResponse) error
+}
+
+type drpcITD_DisconnectStream struct {
+	drpc.Stream
+}
+
+func (x *drpcITD_DisconnectStream) SendAndClose(m *StringResponse) error {
+	if err := x.MsgSend(m, drpcEncoding_File_itd_proto{}); err != nil {
+		return err
+	}
+	return x.CloseSend()
 }
 
 type DRPCFSClient interface {

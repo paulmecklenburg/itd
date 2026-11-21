@@ -52,6 +52,17 @@ func main() {
 				Action:    helpCmd,
 			},
 			{
+				Name:      "connect",
+				ArgsUsage: "[address]",
+				Usage:     "Connect to an InfiniTime device (optionally by Bluetooth MAC address)",
+				Action:    connectDevice,
+			},
+			{
+				Name:   "disconnect",
+				Usage:  "Disconnect from InfiniTime and pause auto-reconnect",
+				Action: disconnectDevice,
+			},
+			{
 				Name:    "resources",
 				Aliases: []string{"res"},
 				Usage:   "Handle InfiniTime resource loading",

@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -61,8 +62,38 @@ func main() {
 	}
 	log.Logger.SetLevel(level)
 
+	adapterCfg := strings.TrimSpace(k.String("bluetooth.adapter"))
+	if adapterCfg != "" && adapterCfg != "hci0" {
+		log.Warn("Configured bluetooth.adapter is not supported by tinygo/bluetooth; falling back to hci0").
+			Str("configured", adapterCfg).
+			Send()
+	}
+
 	// Create infinitime options struct
 	opts := infinitime.Options{
+		Adapter: "hci0",
+		AutoReconnect: func() bool {
+			return k.Bool("conn.reconnect")
+		},
+		AllowFunc: func(mac string) bool {
+			if !k.Bool("conn.whitelist.enabled") {
+				return true
+			}
+			normTarget, err := infinitime.NormalizeMAC(mac)
+			if err != nil {
+				normTarget = strings.ToUpper(strings.TrimSpace(mac))
+			}
+			for _, allowed := range k.Strings("conn.whitelist.devices") {
+				normAllowed, err := infinitime.NormalizeMAC(allowed)
+				if err != nil {
+					normAllowed = strings.ToUpper(strings.TrimSpace(allowed))
+				}
+				if normAllowed != "" && strings.EqualFold(normAllowed, normTarget) {
+					return true
+				}
+			}
+			return false
+		},
 		OnDisconnect: func(dev *infinitime.Device) {
 			log.Warn("Disconnected from InfiniTime, waiting to reconnect").Str("address", dev.Address()).Send()
 		},
@@ -101,6 +132,7 @@ func main() {
 	if err != nil {
 		log.Fatal("Error connecting to InfiniTime").Err(err).Send()
 	}
+	defer dev.Close()
 
 	// Get firmware version
 	ver, err := dev.Version()

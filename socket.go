@@ -229,6 +229,16 @@ func (i *ITD) Address(_ context.Context, _ *rpc.Empty) (*rpc.StringResponse, err
 	return &rpc.StringResponse{Value: i.dev.Address()}, nil
 }
 
+func (i *ITD) Connect(ctx context.Context, req *rpc.ConnectRequest) (*rpc.StringResponse, error) {
+	addr, err := i.dev.ConnectTo(ctx, req.GetAddress())
+	return &rpc.StringResponse{Value: addr}, err
+}
+
+func (i *ITD) Disconnect(_ context.Context, _ *rpc.Empty) (*rpc.StringResponse, error) {
+	addr, err := i.dev.Disconnect()
+	return &rpc.StringResponse{Value: addr}, err
+}
+
 func (i *ITD) Notify(_ context.Context, data *rpc.NotifyRequest) (*rpc.Empty, error) {
 	return &rpc.Empty{}, i.dev.Notify(data.Title, data.Body)
 }

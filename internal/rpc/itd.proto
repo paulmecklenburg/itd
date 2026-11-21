@@ -44,6 +44,10 @@ message DFUProgress {
     int64 total = 3;
 }
 
+message ConnectRequest {
+    string address = 1;
+}
+
 service ITD {
     rpc HeartRate(Empty) returns (IntResponse);
     rpc WatchHeartRate(Empty) returns (stream IntResponse);
@@ -64,6 +68,8 @@ service ITD {
     rpc SetTime(SetTimeRequest) returns (Empty);
     rpc WeatherUpdate(Empty) returns (Empty);
     rpc FirmwareUpgrade(FirmwareUpgradeRequest) returns (stream DFUProgress);
+    rpc Connect(ConnectRequest) returns (StringResponse);
+    rpc Disconnect(Empty) returns (StringResponse);
 }
 
 message PathRequest {

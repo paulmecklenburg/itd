@@ -2,14 +2,28 @@
 
 package infinitime
 
-func isBlueZDeviceConnected(mac string) bool {
+import "tinygo.org/x/bluetooth"
+
+func isBlueZDeviceConnected(adapterID, mac string) bool {
 	return true
 }
 
-func shouldAttemptConnect(mac string, rssi int16) bool {
+func isKnownBlueZInfiniTime(adapterID, mac string) bool {
+	return false
+}
+
+func shouldAttemptConnect(adapterID, mac string, rssi int16) bool {
 	return true
 }
 
-func disconnectBlueZDevice(mac string) {}
+func disconnectBlueZDevice(adapterID, mac string) {}
 
-func stopBlueZNotifies(mac string, chars ...btChar) {}
+func findConnectedBlueZInfiniTime(adapterID string, accept func(mac string) bool, avoidMAC string) (bluetooth.Address, bool) {
+	return bluetooth.Address{}, false
+}
+
+func watchBlueZConnections(adapterID string, onEvent func(addr bluetooth.Address, mac string, connected bool, isInfiniTime bool)) func() {
+	return func() {}
+}
+
+func stopBlueZNotifies(adapterID, mac string, chars ...btChar) {}
