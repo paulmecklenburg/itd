@@ -57,6 +57,13 @@ func main() {
 				Usage:   "Handle InfiniTime resource loading",
 				Subcommands: []*cli.Command{
 					{
+						Flags: []cli.Flag{
+							&cli.StringFlag{
+								Name:    "mode",
+								Aliases: []string{"m"},
+								Usage:   "Sync mode: delete+copy, size-only, or size+crc (default: dynamic size+crc or delete+copy)",
+							},
+						},
 						Name:      "load",
 						ArgsUsage: "<path>",
 						Usage:     "Load an InifiniTime resources package",
@@ -147,6 +154,10 @@ func main() {
 								Name:    "resources",
 								Aliases: []string{"r"},
 								Usage:   "Path to resources file (.zip file)",
+							},
+							&cli.StringFlag{
+								Name:  "resources-mode",
+								Usage: "Resource sync mode when --resources is set: delete+copy, size-only, or size+crc",
 							},
 							&cli.PathFlag{
 								Name:    "archive",

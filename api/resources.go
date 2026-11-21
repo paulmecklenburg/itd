@@ -7,12 +7,25 @@ import (
 	"go.elara.ws/itd/internal/rpc"
 )
 
-type ResourceOperation infinitime.ResourceOperation
+type ResourceOperation = infinitime.ResourceOperation
 
 const (
 	ResourceRemove = infinitime.ResourceRemove
 	ResourceUpload = infinitime.ResourceUpload
+	ResourceCheck  = infinitime.ResourceCheck
+	ResourceSkip   = infinitime.ResourceSkip
 )
+
+type ResourceLoadMode = infinitime.ResourceLoadMode
+
+const (
+	ResourceLoadModeAuto       = infinitime.ResourceLoadModeAuto
+	ResourceLoadModeDeleteCopy = infinitime.ResourceLoadModeDeleteCopy
+	ResourceLoadModeSizeOnly   = infinitime.ResourceLoadModeSizeOnly
+	ResourceLoadModeSizeCRC    = infinitime.ResourceLoadModeSizeCRC
+)
+
+var ParseResourceLoadMode = infinitime.ParseResourceLoadMode
 
 type ResourceLoadProgress struct {
 	Operation ResourceOperation
@@ -25,9 +38,17 @@ type ResourceLoadProgress struct {
 // LoadResources loads resources onto the watch from the given
 // file path to the resources zip
 func (c *FSClient) LoadResources(ctx context.Context, path string) (<-chan ResourceLoadProgress, error) {
+	return c.LoadResourcesWithMode(ctx, path, ResourceLoadModeAuto)
+}
+
+// LoadResourcesWithMode loads resources onto the watch using the specified sync mode.
+func (c *FSClient) LoadResourcesWithMode(ctx context.Context, path string, mode ResourceLoadMode) (<-chan ResourceLoadProgress, error) {
 	progCh := make(chan ResourceLoadProgress, 2)
 
-	rc, err := c.client.LoadResources(ctx, &rpc.PathRequest{Path: path})
+	rc, err := c.client.LoadResources(ctx, &rpc.LoadResourcesRequest{
+		Path: path,
+		Mode: string(mode),
+	})
 	if err != nil {
 		return nil, err
 	}

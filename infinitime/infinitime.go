@@ -137,6 +137,7 @@ func reconnect(opts Options, adapter *bluetooth.Adapter, device *Device, mac str
 		}
 
 		wasFSNotify := device.fsNotifyEnabled.Swap(false)
+		device.fsCRCSupport.Store(0)
 
 		device.deviceMtx.Lock()
 		device.device = dev
@@ -322,6 +323,7 @@ type Device struct {
 	fsNotifyMtx     sync.Mutex
 	fsNotifyCh      chan []byte
 	fsNotifyEnabled atomic.Bool
+	fsCRCSupport    atomic.Int32
 
 	notifierMtx sync.Mutex
 	notifierMap map[btChar]notifier

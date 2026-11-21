@@ -22,6 +22,7 @@ const (
 	MakeDirectoryOpcode   FSReqOpcode = 0x40
 	ListDirectoryOpcode   FSReqOpcode = 0x50
 	MoveFileOpcode        FSReqOpcode = 0x60
+	ChecksumFileOpcode    FSReqOpcode = 0x70
 )
 
 type FSRespOpcode uint8
@@ -33,6 +34,7 @@ const (
 	MakeDirectoryResp FSRespOpcode = 0x41
 	ListDirectoryResp FSRespOpcode = 0x51
 	MoveFileResp      FSRespOpcode = 0x61
+	ChecksumFileResp  FSRespOpcode = 0x71
 )
 
 type ReadFileHeaderRequest struct {
@@ -138,7 +140,21 @@ type MoveFileResponse struct {
 	Status int8
 }
 
-func WriteRequest(char *bluetooth.DeviceCharacteristic, opcode FSReqOpcode, req any) error {
+type ChecksumFileRequest struct {
+	Padding byte
+	PathLen uint16
+	Path    string
+}
+
+type ChecksumFileResponse struct {
+	Status   int8
+	Padding  [2]byte
+	FileSize uint32
+	CRC32    uint32
+}
+
+// EncodeRequest serializes a BLE FS request packet without sending it.
+func EncodeRequest(opcode FSReqOpcode, req any) []byte {
 	buf := &bytes.Buffer{}
 	buf.WriteByte(byte(opcode))
 
@@ -160,7 +176,11 @@ func WriteRequest(char *bluetooth.DeviceCharacteristic, opcode FSReqOpcode, req 
 		}
 	}
 
-	_, err := char.WriteWithoutResponse(buf.Bytes())
+	return buf.Bytes()
+}
+
+func WriteRequest(char *bluetooth.DeviceCharacteristic, opcode FSReqOpcode, req any) error {
+	_, err := char.WriteWithoutResponse(EncodeRequest(opcode, req))
 	return err
 }
 

@@ -103,12 +103,19 @@ message ResourceLoadProgress {
     enum Operation {
         Upload = 0;
         RemoveObsolete = 1;
+        Check = 2;
+        Skip = 3;
     }
 
     string name = 1;
     int64 total = 2;
     int64 sent = 3;
     Operation operation = 4;
+}
+
+message LoadResourcesRequest {
+    string path = 1;
+    string mode = 2;
 }
 
 service FS {
@@ -120,5 +127,5 @@ service FS {
     rpc ReadDir(PathRequest) returns (DirResponse);
     rpc Upload(TransferRequest) returns (stream TransferProgress);
     rpc Download(TransferRequest) returns (stream TransferProgress);
-    rpc LoadResources(PathRequest) returns (stream ResourceLoadProgress);
+    rpc LoadResources(LoadResourcesRequest) returns (stream ResourceLoadProgress);
 }

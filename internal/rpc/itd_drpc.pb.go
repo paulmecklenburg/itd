@@ -761,7 +761,7 @@ type DRPCFSClient interface {
 	ReadDir(ctx context.Context, in *PathRequest) (*DirResponse, error)
 	Upload(ctx context.Context, in *TransferRequest) (DRPCFS_UploadClient, error)
 	Download(ctx context.Context, in *TransferRequest) (DRPCFS_DownloadClient, error)
-	LoadResources(ctx context.Context, in *PathRequest) (DRPCFS_LoadResourcesClient, error)
+	LoadResources(ctx context.Context, in *LoadResourcesRequest) (DRPCFS_LoadResourcesClient, error)
 }
 
 type drpcFSClient struct {
@@ -900,7 +900,7 @@ func (x *drpcFS_DownloadClient) RecvMsg(m *TransferProgress) error {
 	return x.MsgRecv(m, drpcEncoding_File_itd_proto{})
 }
 
-func (c *drpcFSClient) LoadResources(ctx context.Context, in *PathRequest) (DRPCFS_LoadResourcesClient, error) {
+func (c *drpcFSClient) LoadResources(ctx context.Context, in *LoadResourcesRequest) (DRPCFS_LoadResourcesClient, error) {
 	stream, err := c.cc.NewStream(ctx, "/rpc.FS/LoadResources", drpcEncoding_File_itd_proto{})
 	if err != nil {
 		return nil, err
@@ -945,7 +945,7 @@ type DRPCFSServer interface {
 	ReadDir(context.Context, *PathRequest) (*DirResponse, error)
 	Upload(*TransferRequest, DRPCFS_UploadStream) error
 	Download(*TransferRequest, DRPCFS_DownloadStream) error
-	LoadResources(*PathRequest, DRPCFS_LoadResourcesStream) error
+	LoadResources(*LoadResourcesRequest, DRPCFS_LoadResourcesStream) error
 }
 
 type DRPCFSUnimplementedServer struct{}
@@ -982,7 +982,7 @@ func (s *DRPCFSUnimplementedServer) Download(*TransferRequest, DRPCFS_DownloadSt
 	return drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
 }
 
-func (s *DRPCFSUnimplementedServer) LoadResources(*PathRequest, DRPCFS_LoadResourcesStream) error {
+func (s *DRPCFSUnimplementedServer) LoadResources(*LoadResourcesRequest, DRPCFS_LoadResourcesStream) error {
 	return drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
 }
 
@@ -1069,7 +1069,7 @@ func (DRPCFSDescription) Method(n int) (string, drpc.Encoding, drpc.Receiver, in
 			func(srv interface{}, ctx context.Context, in1, in2 interface{}) (drpc.Message, error) {
 				return nil, srv.(DRPCFSServer).
 					LoadResources(
-						in1.(*PathRequest),
+						in1.(*LoadResourcesRequest),
 						&drpcFS_LoadResourcesStream{in2.(drpc.Stream)},
 					)
 			}, DRPCFSServer.LoadResources, true

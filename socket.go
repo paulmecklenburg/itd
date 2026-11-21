@@ -430,8 +430,13 @@ func (fs *FS) Download(req *rpc.TransferRequest, s rpc.DRPCFS_DownloadStream) er
 	return nil
 }
 
-func (fs *FS) LoadResources(req *rpc.PathRequest, s rpc.DRPCFS_LoadResourcesStream) error {
-	return infinitime.LoadResources(req.Path, fs.fs, func(evt infinitime.ResourceLoadProgress) {
+func (fs *FS) LoadResources(req *rpc.LoadResourcesRequest, s rpc.DRPCFS_LoadResourcesStream) error {
+	mode, err := infinitime.ParseResourceLoadMode(req.GetMode())
+	if err != nil {
+		return err
+	}
+
+	return infinitime.LoadResourcesWithMode(req.GetPath(), fs.fs, mode, func(evt infinitime.ResourceLoadProgress) {
 		_ = s.Send(&rpc.ResourceLoadProgress{
 			Name:      evt.Name,
 			Total:     int64(evt.Total),

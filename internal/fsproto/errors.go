@@ -40,6 +40,8 @@ func (err Error) Error() string {
 		return "entry already exists"
 	case -20:
 		return "entry is not a directory"
+	case -21:
+		return "entry is a directory"
 	case -39:
 		return "directory is not empty"
 	case -9:

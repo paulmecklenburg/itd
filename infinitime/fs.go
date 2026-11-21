@@ -162,6 +162,107 @@ func (ifs *FS) ReadDir(path string) ([]fs.DirEntry, error) {
 	)
 }
 
+// ChecksumFile queries the watch for the size and IEEE CRC-32 of the file at path p.
+func (ifs *FS) ChecksumFile(p string) (uint32, uint32, error) {
+	ifs.mtx.Lock()
+	defer ifs.mtx.Unlock()
+
+	char, err := ifs.dev.getChar(fsTransferChar)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	var resp fsproto.ChecksumFileResponse
+	err = ifs.requestThenAwaitResponse(
+		char,
+		fsproto.ChecksumFileOpcode,
+		fsproto.ChecksumFileRequest{
+			PathLen: uint16(len(p)),
+			Path:    p,
+		},
+		func(buf []byte) (bool, error) {
+			if len(buf) >= 2 && fsproto.FSRespOpcode(buf[0]) == fsproto.ChecksumFileResp && int8(buf[1]) != 0x01 {
+				return true, fsproto.Error{Code: int8(buf[1])}
+			}
+			return true, fsproto.ReadResponse(buf, fsproto.ChecksumFileResp, &resp)
+		},
+	)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return resp.FileSize, resp.CRC32, nil
+}
+
+// SupportsCRC reports whether the connected watch supports the BLE FS CRC-32 command (0x70).
+func (ifs *FS) SupportsCRC() (bool, error) {
+	switch ifs.dev.fsCRCSupport.Load() {
+	case 1:
+		return true, nil
+	case -1:
+		return false, nil
+	}
+
+	// Verify BLE FS is available on the connected watch before probing opcode 0x70
+	// so missing-characteristic or disconnect errors are not misclassified as lack of CRC support.
+	if _, err := ifs.ReadDir("/"); err != nil {
+		return false, err
+	}
+
+	ifs.mtx.Lock()
+	defer ifs.mtx.Unlock()
+
+	switch ifs.dev.fsCRCSupport.Load() {
+	case 1:
+		return true, nil
+	case -1:
+		return false, nil
+	}
+
+	char, err := ifs.dev.getChar(fsTransferChar)
+	if err != nil {
+		return false, err
+	}
+
+	if err := ifs.ensureNotifications(char); err != nil {
+		return false, err
+	}
+
+	for len(ifs.dev.fsNotifyCh) > 0 {
+		<-ifs.dev.fsNotifyCh
+	}
+
+	if err := fsproto.WriteRequest(char, fsproto.ChecksumFileOpcode, fsproto.ChecksumFileRequest{
+		PathLen: 1,
+		Path:    "/",
+	}); err != nil {
+		return false, err
+	}
+
+	disconnectCh := ifs.dev.getDisconnectCh()
+	timer := time.NewTimer(1500 * time.Millisecond)
+	defer timer.Stop()
+
+	select {
+	case buf := <-ifs.dev.fsNotifyCh:
+		if len(buf) >= 2 && fsproto.FSRespOpcode(buf[0]) == fsproto.ChecksumFileResp && int8(buf[1]) != 0x04 {
+			ifs.dev.fsCRCSupport.Store(1)
+			return true, nil
+		}
+		ifs.dev.fsCRCSupport.Store(-1)
+		return false, nil
+	case <-disconnectCh:
+		ifs.dev.fsNotifyEnabled.Store(false)
+		return false, errors.New("device disconnected during filesystem operation")
+	case <-timer.C:
+		if !ifs.dev.IsConnected() {
+			return false, errors.New("device disconnected during filesystem operation")
+		}
+		ifs.dev.fsCRCSupport.Store(-1)
+		return false, nil
+	}
+}
+
 // RemoveAll removes the file at the specified path and any children it contains,
 // similar to the rm -r command.
 func (ifs *FS) RemoveAll(p string) error {
